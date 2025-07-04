@@ -47,7 +47,7 @@ Upstage의 Solar Pro 모델을 활용하여 비자 정보, 체류 정보 등 다
 3. `.env` 파일을 생성하고, 필요한 환경 변수를 설정합니다.  
    예시:
    ```env
-   NEXT_PUBLIC_API_URL=http://localhost:8000
+   NEXT_PUBLIC_API_URL=http://localhost:3000
    ```
 4. 필요한 패키지를 설치합니다:
    ```bash
