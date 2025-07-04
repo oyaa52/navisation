@@ -2,7 +2,7 @@
 
 ## 프로젝트 소개
 
-[사이트 바로가기](https://navisation.vercel.app/)
+[사이트 바로가기](https://navisation-phi.vercel.app/)
 
 Navisation은 여행자와 사용자를 위한 내비게이션 및 비자 정보 안내 서비스를 제공합니다. 
 이 프로젝트는 Python 기반 FastAPI 백엔드와 Next.js 기반 프론트엔드로 구성되어 있습니다.
