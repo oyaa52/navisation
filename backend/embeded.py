@@ -25,6 +25,8 @@ UPSTAGE_API_KEY = os.getenv("UPSTAGE_API_KEY")
 
 # ---------------------------------------
 def remove_markdown(text: str) -> str:
+    # <think>...</think>로 묶인 텍스트 제거
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
     # 굵은 텍스트 제거
     text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
     # 기울임 텍스트 제거
