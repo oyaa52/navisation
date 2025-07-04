@@ -1,7 +1,7 @@
-
 # from pdfminer.high_level import extract_text
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
+import re
 import json
 import time
 import tiktoken
@@ -23,68 +23,111 @@ from ragas.metrics import context_precision, context_recall, faithfulness
 UPSTAGE_API_KEY = os.getenv("UPSTAGE_API_KEY")
 
 
-
 # ---------------------------------------
+def remove_markdown(text: str) -> str:
+    # 굵은 텍스트 제거
+    text = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
+    # 기울임 텍스트 제거
+    text = re.sub(r"\*(.*?)\*", r"\1", text)
+    # 헤더 제거
+    text = re.sub(r"#+ ", "", text)
+    # 리스트 기호 제거
+    text = re.sub(r"^\s*[-*+]\s+", "", text, flags=re.MULTILINE)
+    # 인라인 코드 제거
+    text = re.sub(r"`(.*?)`", r"\1", text)
+    # 코드블럭 제거
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    return text.strip()
+
 
 def load_vectorstore(UPSTAGE_API_KEY):
-    # 1. 같은 임베딩 모델 인스턴스를 다시 만들어야 합니다 (이게 중요!)
-    embedding_model = UpstageEmbeddings(api_key=UPSTAGE_API_KEY, model="solar-embedding-1-large-passage")
+    embedding_model = UpstageEmbeddings(
+        api_key=UPSTAGE_API_KEY, model="solar-embedding-1-large-passage"
+    )
 
-    # 2. FAISS 저장된 벡터스토어 경로 지정 (예: 'faiss_store')
-    vectorstore = FAISS.load_local("faiss_vector_store", embedding_model, allow_dangerous_deserialization=True)
+    vectorstore = FAISS.load_local(
+        "faiss_vector_store", embedding_model, allow_dangerous_deserialization=True
+    )
     return vectorstore
 
 
 def get_answer(vectorstore, question, lang, memory):
     llm = ChatUpstage(
-    model="solar-1-mini-chat",  # 또는 "solar-1-mini-32k" 등 사용 가능
-    temperature=0.3
+        model="solar-pro2-preview", temperature=0.3, reasoning_effort="high"
     )
     language = lang
 
     # 2. 프롬프트 정의
-    prompt_template = PromptTemplate.from_template("""
-        당신은 대한민국 출입국 관련 매뉴얼을 바탕으로 질문에 답변하는 전문가이자 통역가입니다. 
-
-        
+    prompt_template = PromptTemplate.from_template(
+        # """
+        # 당신은 대한민국 출입국 관련 매뉴얼을 바탕으로 질문에 답변하는 전문가이자 통역가입니다.
+        # ---
+        # 다음은 참고할 정보입니다.
+        # 컨텍스트:
+        # {context}
+        # 이전 대화 기록:
+        # {history}
+        # 질문:
+        # {question}
+        # ---
+        # #Strong Rules:
+        # #AVOID ALL markdown elements: **bold**, *italic*, #headers, -lists, ` code blocks, etc.
+        # 질문과 컨텍스트를 잘 읽고, 아래 지침에 따라 사용자가 사용한 언어인 {language}으로 가장 적절한 답변을 해 주세요. 적절한 주제와 내용, 이모지로 구성하여 읽기 쉽게 작성해 주세요.:
+        # - 반드시 사용자가 사용한 언어인 {language}를 사용하여 답변하세요!!!
+        # - 만약 이전 대화 기록이 있다면 반드시 **이전에** 사용자가 선택한 **세부 비자 유형**에 맞는 답변을 해 주세요.
+        # - 각 비자에는 세부 유형(sub-type)이 있을 수 있습니다 (예: D-8-1, D-8-4).
+        #   → 각 세부 비자별 요건 및 제출 서류가 다르므로, 반드시 정확한 세부 유형을 구분하여 사용자가 사용한 언어인 {language}으로 답변해 주세요.
+        # - 각 비자에 대한 제출 서류, 대상자, 자격요건 등은 모든 조건을 만족해야 하는지, 아니면 일부만 만족해도 되는지 명확히 구분하여 답변해 주세요.
+        # - 점수제에도 여러 종류가 있습니다. 비자에 따라 해당하는 점수제가 달라지니 유의해서 답변해 주세요.
+        # - 컨텍스트에 답변에 필요한 정보가 부족하다면, 절대로 추측하지 말고 주어진 정보만 바탕으로 답변해 주세요..
+        # - 이전 대화에 포함된 질문이라면 간결하게 다시 설명하고, 새 정보가 있다면 그 위주로 답변하세요.
+        # - 답변에는 질문 내용을 반복하지 마시고, 바로 답변부터 시작하세요.
+        # ---
+        # 답변:
+        # """
+        """
+        You are an expert and interpreter who answers questions based on the Korean immigration manual. 
                                                    
         ---
-        다음은 참고할 정보입니다. 
+        Here is the information to refer to. 
 
-        컨텍스트:
+        Context:
         {context}
                                                    
-        이전 대화 기록: 
+        History of previous conversations: 
         {history}
 
-        질문:
+        Question:
         {question}
 
         ---
+        #Strong Rules:
+        #AVOID ALL markdown elements: **bold**, *italic*, #headers, -lists, ` code blocks, etc. 
                                                    
-        질문과 컨텍스트를 잘 읽고, 아래 지침에 따라 사용자가 사용한 언어인 {language}으로 가장 적절한 답변을 해 주세요. 적절한 주제와 내용, 이모지로 구성하여 읽기 쉽게 작성해 주세요.:
-        - 반드시 사용자가 사용한 언어인 {language}를 사용하여 답변하세요!!!
-        - 각 비자에는 세부 유형(sub-type)이 있을 수 있습니다 (예: D-8-1, D-8-4).  
-          → 각 세부 비자별 요건 및 제출 서류가 다르므로, 반드시 정확한 세부 유형을 구분하여 사용자가 사용한 언어인 {language}으로 답변해 주세요.
-        - 각 비자에 대한 제출 서류, 대상자, 자격요건 등은 모든 조건을 만족해야 하는지, 아니면 일부만 만족해도 되는지 명확히 구분하여 답변해 주세요.
-        - 점수제에도 여러 종류가 있습니다. 비자에 따라 해당하는 점수제가 달라지니 유의해서 답변해 주세요.
-        - 컨텍스트에 답변에 필요한 정보가 부족하다면, 절대로 추측하지 말고 주어진 정보만 바탕으로 답변해 주세요..
-        - 이전 대화에 포함된 질문이라면 간결하게 다시 설명하고, 새 정보가 있다면 그 위주로 답변하세요.
-        - 답변에는 질문 내용을 반복하지 마시고, 바로 답변부터 시작하세요.
+        Read the questions and context carefully and follow the instructions below to give the most appropriate answer in the language you used: {language}. Please make it easy to read by organizing appropriate topics, contents, and emojis:
+        - Be sure to answer using {language}, the language you used!!!
+        - If you have a history of previous conversations, please be sure to give an answer that matches the **Detailed Visa type ** you have chosen before ****.
+        - Each visa may have a sub-type (e.g., D-8-1, D-8-4).  
+          → Since each detailed visa requirement and submission document are different, be sure to distinguish the exact detailed type and answer in {language}, the language you used.
+        - Please answer the submission documents, subjects, qualification requirements, etc. for each visa by clearly separating whether they should meet all conditions or only a part of them.
+        - There are many types of scoring systems. Please answer carefully because the corresponding scoring system varies depending on the visa.
+        - If the context lacks the information you need to answer, please never guess and answer based only on the information given..
+        - If the questions are included in the previous conversation, please briefly explain them again, and if you have any new information, answer them mainly.
+        - Don't repeat the question in your answer, but start with the answer right away.
                                                    
         --- 
 
-        답변:
-        """)
+        Answer:
+        """
+    )
 
     chain = prompt_template | llm | StrOutputParser()
 
     # 3. Retriever 정의
     retriever = vectorstore.as_retriever(
-    search_type="mmr",
-    search_kwargs={"k": 3, "fetch_k": 20, "lambda_mult": 0.9},
+        search_type="mmr",
+        search_kwargs={"k": 3, "fetch_k": 20, "lambda_mult": 0.9},
     )
-
 
     history_str = memory.load_memory_variables({}).get("history", "")
 
@@ -97,13 +140,17 @@ def get_answer(vectorstore, question, lang, memory):
     # context_str = (history_str + "\n\n" if history_str else "") + context
 
     # 6. LLM 호출 (필수 프롬프트 변수 포함)
-    answer = chain.invoke({
-        "context": context,
-        "question": question,
-        "language": language,
-        "history" : history_str
-    })
-    
+    answer = chain.invoke(
+        {
+            "context": context,
+            "question": question,
+            "language": language,
+            "history": history_str,
+        }
+    )
+
+    answer = remove_markdown(answer)
+
     memory.save_context({"input": question}, {"output": answer})
 
     return answer
@@ -315,7 +362,6 @@ def get_answer(vectorstore, question, lang, memory):
 #         time.sleep(1)  # 요청 속도 제한 방지
 #     except Exception as e:
 #         print(f"❗ Doc {i} 임베딩 실패: {e}")
-
 
 
 # # 첫 번째 문서 확인
